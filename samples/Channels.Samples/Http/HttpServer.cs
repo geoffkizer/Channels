@@ -46,7 +46,7 @@ namespace Channels.Samples.Http
                     {
                         break;
                     }
-                    catch (Exception ex)
+                    catch (Exception )
                     {
 
                     }

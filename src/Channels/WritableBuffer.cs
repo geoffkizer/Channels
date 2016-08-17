@@ -11,23 +11,40 @@ namespace Channels
 {
     public struct WritableBuffer
     {
+        private LinkedBuffers _buffers;
+
+        // These are now cached values from the head of LinkedBuffers
         private MemoryPoolBlock _block;
         private int _index;
 
+#if false
         public WritableBuffer(MemoryPoolBlock block)
         {
+            _buffers = new LinkedBuffers() { Block = block, Next = null };
             _block = block;
             _index = _block?.Start ?? 0;
         }
+
         public WritableBuffer(MemoryPoolBlock block, int index)
         {
+            _buffers = new LinkedBuffers() { Block = block, Next = null };
             _block = block;
+            _index = index;
+        }
+#endif
+
+        public WritableBuffer(LinkedBuffers buffers, int index)
+        {
+            _buffers = buffers;
+            _block = buffers.Block;
             _index = index;
         }
 
         internal MemoryPoolBlock Block => _block;
 
         internal int Index => _index;
+
+        internal LinkedBuffers Link => _buffers; 
 
         internal bool IsDefault => _block == null;
 
@@ -41,7 +58,7 @@ namespace Channels
             }
 
             Debug.Assert(_block != null);
-            Debug.Assert(_block.Next == null);
+            Debug.Assert(_buffers.Next == null);
             Debug.Assert(_block.End == _index);
 
             var pool = _block.Pool;
@@ -50,12 +67,17 @@ namespace Channels
 
             var bytesLeftInBlock = block.Data.Offset + block.Data.Count - blockIndex;
 
+            var link = _buffers;
             if (bytesLeftInBlock == 0)
             {
                 var nextBlock = pool.Lease();
                 block.End = blockIndex;
-                Volatile.Write(ref block.Next, nextBlock);
+
+                var nextLink = new LinkedBuffers() { Block = nextBlock, Next = null };
+//                    Volatile.Write(ref link.Next, nextLink);
+                link.Next = nextLink;
                 block = nextBlock;
+                link = nextLink;
 
                 blockIndex = block.Data.Offset;
                 bytesLeftInBlock = block.Data.Count;
@@ -66,6 +88,7 @@ namespace Channels
             blockIndex++;
 
             block.End = blockIndex;
+            _buffers = link;
             _block = block;
             _index = blockIndex;
         }
@@ -78,7 +101,7 @@ namespace Channels
             }
 
             Debug.Assert(_block != null);
-            Debug.Assert(_block.Next == null);
+            Debug.Assert(_buffers.Next == null);
             Debug.Assert(_block.End == _index);
 
             var pool = _block.Pool;
@@ -89,14 +112,19 @@ namespace Channels
             var remaining = count;
             var bytesLeftInBlock = block.Data.Offset + block.Data.Count - blockIndex;
 
+            var link = _buffers;
             while (remaining > 0)
             {
                 if (bytesLeftInBlock == 0)
                 {
                     var nextBlock = pool.Lease();
                     block.End = blockIndex;
-                    Volatile.Write(ref block.Next, nextBlock);
+
+                    var nextLink = new LinkedBuffers() { Block = nextBlock, Next = null };
+//                    Volatile.Write(ref link.Next, nextLink);
+                    link.Next = nextLink;
                     block = nextBlock;
+                    link = nextLink;
 
                     blockIndex = block.Data.Offset;
                     bytesLeftInBlock = block.Data.Count;
@@ -113,25 +141,29 @@ namespace Channels
             }
 
             block.End = blockIndex;
+            _buffers = link;
             _block = block;
             _index = blockIndex;
         }
 
+#if false       // is this used?
         public void Append(ReadableBuffer begin, ReadableBuffer end)
         {
             Debug.Assert(_block != null);
-            Debug.Assert(_block.Next == null);
+            Debug.Assert(_buffers.Next == null);
             Debug.Assert(_block.End == _index);
 
+            _buffers.Next = begin.Block
             _block.Next = begin.Block;
             _block = end.Block;
             _index = end.Block.End;
         }
+#endif
 
         public void UpdateWritten(int bytesWritten)
         {
             Debug.Assert(_block != null);
-            Debug.Assert(_block.Next == null);
+            Debug.Assert(_buffers.Next == null);
             Debug.Assert(_block.End == _index);
 
             var block = _block;

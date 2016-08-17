@@ -13,23 +13,40 @@ namespace Channels
     {
         private static readonly int _vectorSpan = Vector<byte>.Count;
 
+        private LinkedBuffers _buffers;
+
+        // These are now cached values from the head of LinkedBuffers
         private MemoryPoolBlock _block;
         private int _index;
 
+        public ReadableBuffer(LinkedBuffers buffers)
+        {
+            _buffers = buffers;
+            _block = buffers.Block;
+            _index = _block?.Start ?? 0;
+        }
+
+#if false
         public ReadableBuffer(MemoryPoolBlock block)
         {
+            _buffers = new LinkedBuffers() { Block = block, Next = null };
             _block = block;
             _index = _block?.Start ?? 0;
         }
+
         public ReadableBuffer(MemoryPoolBlock block, int index)
         {
+            _buffers = new LinkedBuffers() { Block = block, Next = null };
             _block = block;
             _index = index;
         }
+#endif
 
         internal MemoryPoolBlock Block => _block;
 
         internal int Index => _index;
+
+        internal LinkedBuffers Link => _buffers;
 
         internal bool IsDefault => _block == null;
 
@@ -47,14 +64,15 @@ namespace Channels
                 }
                 else
                 {
-                    var block = _block.Next;
-                    while (block != null)
+                    var link = _buffers.Next;
+                    while (link != null)
                     {
+                        var block = link.Block;
                         if (block.Start < block.End)
                         {
                             return false; // subsequent block has data - IsEnd is false
                         }
-                        block = block.Next;
+                        link = link.Next;
                     }
                     return true;
                 }
@@ -70,7 +88,8 @@ namespace Channels
             }
 
             var index = _index;
-            var wasLastBlock = block.Next == null;
+            var link = _buffers;
+            var wasLastBlock = link.Next == null;
 
             if (index < block.End)
             {
@@ -86,11 +105,12 @@ namespace Channels
                 }
                 else
                 {
-                    block = block.Next;
+                    link = link.Next;
+                    block = link.Block;
                     index = block.Start;
                 }
 
-                wasLastBlock = block.Next == null;
+                wasLastBlock = link.Next == null;
 
                 if (index < block.End)
                 {
@@ -108,7 +128,8 @@ namespace Channels
                 return;
             }
 
-            var wasLastBlock = _block.Next == null;
+            var link = _buffers;
+            var wasLastBlock = link.Next == null;
             var following = _block.End - _index;
 
             if (following >= bytesToSkip)
@@ -128,11 +149,12 @@ namespace Channels
                 else
                 {
                     bytesToSkip -= following;
-                    block = block.Next;
+                    link = link.Next;
+                    block = link.Block;
                     index = block.Start;
                 }
 
-                wasLastBlock = block.Next == null;
+                wasLastBlock = link.Next == null;
                 following = block.End - index;
 
                 if (following >= bytesToSkip)
@@ -156,7 +178,8 @@ namespace Channels
                 return 0;
             }
 
-            var wasLastBlock = _block.Next == null;
+            var link = _buffers;
+            var wasLastBlock = link.Next == null;
             var following = _block.End - _index;
 
             if (following >= bytes)
@@ -178,11 +201,12 @@ namespace Channels
                 else
                 {
                     bytes -= following;
-                    block = block.Next;
+                    link = link.Next;
+                    block = link.Block;
                     index = block.Start;
                 }
 
-                wasLastBlock = block.Next == null;
+                wasLastBlock = link.Next == null;
                 following = block.End - index;
 
                 if (following >= bytes)
@@ -202,7 +226,8 @@ namespace Channels
                 return -1;
             }
 
-            var wasLastBlock = _block.Next == null;
+            var link = _buffers;
+            var wasLastBlock = link.Next == null;
             var index = _index;
 
             if (index < block.End)
@@ -218,11 +243,12 @@ namespace Channels
                 }
                 else
                 {
-                    block = block.Next;
+                    link = link.Next;
+                    block = link.Block;
                     index = block.Start;
                 }
 
-                wasLastBlock = block.Next == null;
+                wasLastBlock = link.Next == null;
 
                 if (index < block.End)
                 {
@@ -238,7 +264,8 @@ namespace Channels
                 return -1;
             }
 
-            var wasLastBlock = _block.Next == null;
+            var link = _buffers;
+            var wasLastBlock = link.Next == null;
 
             if (_block.End - _index >= sizeof(long))
             {
@@ -253,14 +280,15 @@ namespace Channels
                 var blockBytes = _block.End - _index;
                 var nextBytes = sizeof(long) - blockBytes;
 
-                if (_block.Next.End - _block.Next.Start < nextBytes)
+                var nextBlock = link.Next.Block;
+                if (nextBlock.End - nextBlock.Start < nextBytes)
                 {
                     return -1;
                 }
 
                 var blockLong = *(long*)(_block.DataFixedPtr + _block.End - sizeof(long));
 
-                var nextLong = *(long*)(_block.Next.DataFixedPtr + _block.Next.Start);
+                var nextLong = *(long*)(nextBlock.DataFixedPtr + nextBlock.Start);
 
                 return (blockLong >> (sizeof(long) - blockBytes) * 8) | (nextLong << (sizeof(long) - nextBytes) * 8);
             }
@@ -275,7 +303,8 @@ namespace Channels
 
             var block = _block;
             var index = _index;
-            var wasLastBlock = block.Next == null;
+            var link = _buffers;
+            var wasLastBlock = link.Next == null;
             var following = block.End - index;
             byte[] array;
             var byte0 = byte0Vector[0];
@@ -290,9 +319,10 @@ namespace Channels
                         _index = index;
                         return -1;
                     }
-                    block = block.Next;
+                    link = link.Next;
+                    block = link.Block;
                     index = block.Start;
-                    wasLastBlock = block.Next == null;
+                    wasLastBlock = link.Next == null;
                     following = block.End - index;
                 }
                 array = block.Array;
@@ -353,7 +383,8 @@ namespace Channels
 
             var block = _block;
             var index = _index;
-            var wasLastBlock = block.Next == null;
+            var link = _buffers;
+            var wasLastBlock = link.Next == null;
             var following = block.End - index;
             byte[] array;
             int byte0Index = int.MaxValue;
@@ -371,9 +402,10 @@ namespace Channels
                         _index = index;
                         return -1;
                     }
-                    block = block.Next;
+                    link = link.Next;
+                    block = link.Block;
                     index = block.Start;
-                    wasLastBlock = block.Next == null;
+                    wasLastBlock = link.Next == null;
                     following = block.End - index;
                 }
                 array = block.Array;
@@ -458,7 +490,8 @@ namespace Channels
 
             var block = _block;
             var index = _index;
-            var wasLastBlock = block.Next == null;
+            var link = _buffers;
+            var wasLastBlock = link.Next == null;
             var following = block.End - index;
             byte[] array;
             int byte0Index = int.MaxValue;
@@ -478,9 +511,10 @@ namespace Channels
                         _index = index;
                         return -1;
                     }
-                    block = block.Next;
+                    link = link.Next;
+                    block = link.Block;
                     index = block.Start;
-                    wasLastBlock = block.Next == null;
+                    wasLastBlock = link.Next == null;
                     following = block.End - index;
                 }
                 array = block.Array;
@@ -645,6 +679,7 @@ namespace Channels
             throw new InvalidOperationException();
         }
 
+#if false
         /// <summary>
         /// Save the data at the current location then move to the next available space.
         /// </summary>
@@ -681,6 +716,7 @@ namespace Channels
                 }
             }
         }
+#endif
 
         public int GetLength(ReadableBuffer end)
         {
@@ -692,6 +728,7 @@ namespace Channels
             var block = _block;
             var index = _index;
             var length = 0;
+            var link = _buffers;
             checked
             {
                 while (true)
@@ -700,14 +737,15 @@ namespace Channels
                     {
                         return length + end._index - index;
                     }
-                    else if (block.Next == null)
+                    else if (link.Next == null)
                     {
                         throw new InvalidOperationException("end did not follow iterator");
                     }
                     else
                     {
                         length += block.End - index;
-                        block = block.Next;
+                        link = link.Next;
+                        block = link.Block;
                         index = block.Start;
                     }
                 }
@@ -738,9 +776,10 @@ namespace Channels
 
             int following = 0;
 
+            var link = _buffers;
             while (true)
             {
-                var wasLastBlock = block.Next == null || end.Block == block;
+                var wasLastBlock = link.Next == null || end.Block == block;
 
                 if (end.Block == block)
                 {
@@ -762,7 +801,8 @@ namespace Channels
                 }
                 else
                 {
-                    block = block.Next;
+                    link = link.Next;
+                    block = link.Block;
                     index = block.Start;
                 }
             }
@@ -785,13 +825,14 @@ namespace Channels
             var block = _block;
             var index = _index;
             var remaining = count;
+            var link = _buffers;
             while (true)
             {
                 // Determine if we might attempt to copy data from block.Next before
                 // calculating "following" so we don't risk skipping data that could
                 // be added after block.End when we decide to copy from block.Next.
                 // block.End will always be advanced before block.Next is set.
-                var wasLastBlock = block.Next == null;
+                var wasLastBlock = link.Next == null;
                 var following = block.End - index;
                 if (remaining <= following)
                 {
@@ -824,7 +865,8 @@ namespace Channels
                     }
                     offset += following;
                     remaining -= following;
-                    block = block.Next;
+                    link = link.Next;
+                    block = link.Block;
                     index = block.Start;
                 }
             }

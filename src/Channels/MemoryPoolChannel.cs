@@ -19,8 +19,10 @@ namespace Channels
 
         private Action _awaitableState;
 
-        private MemoryPoolBlock _head;
-        private MemoryPoolBlock _tail;
+//        private MemoryPoolBlock _head;
+//        private MemoryPoolBlock _tail;
+        private LinkedBuffers _head;
+        private LinkedBuffers _tail;
 
         private bool _completedWriting;
         private bool _completedReading;
@@ -54,36 +56,38 @@ namespace Channels
 
         public WritableBuffer BeginWrite(int minimumSize = 0)
         {
-            MemoryPoolBlock block = null;
+            LinkedBuffers link = null;
 
             if (_tail != null)
             {
-                int remaining = _tail.Data.Offset + _tail.Data.Count - _tail.End;
+                int remaining = _tail.Block.Data.Offset + _tail.Block.Data.Count - _tail.Block.End;
 
                 if (minimumSize <= remaining && remaining > 0)
                 {
-                    block = _tail;
+                    link = _tail;
                 }
             }
 
-            if (block == null)
+            if (link == null)
             {
-                block = _memory.Lease();
+                var block = _memory.Lease();
+                link = new LinkedBuffers() { Block = block, Next = null };
             }
 
             lock (_sync)
             {
                 if (_head == null)
                 {
-                    _head = block;
+                    _head = link;
                 }
-                else if (block != _tail)
+                else if (link != _tail)
                 {
-                    Volatile.Write(ref _tail.Next, block);
-                    _tail = block;
+//                    Volatile.Write(ref _tail.Next, block);
+                    _tail.Next = link;
+                    _tail = link;
                 }
 
-                return new WritableBuffer(block, block.End);
+                return new WritableBuffer(link, link.Block.End);
             }
         }
 
@@ -93,8 +97,8 @@ namespace Channels
             {
                 if (!end.IsDefault)
                 {
-                    _tail = end.Block;
-                    _tail.End = end.Index;
+                    _tail = end.Link;
+                    _tail.Block.End = end.Index;
                 }
 
                 Complete();
@@ -144,17 +148,19 @@ namespace Channels
             ReadableBuffer consumed,
             ReadableBuffer examined)
         {
-            MemoryPoolBlock returnStart = null;
-            MemoryPoolBlock returnEnd = null;
+//            MemoryPoolBlock returnStart = null;
+//            MemoryPoolBlock returnEnd = null;
+            LinkedBuffers returnStart = null;
+            LinkedBuffers returnEnd = null;
 
             lock (_sync)
             {
                 if (!consumed.IsDefault)
                 {
                     returnStart = _head;
-                    returnEnd = consumed.Block;
-                    _head = consumed.Block;
-                    _head.Start = consumed.Index;
+                    returnEnd = consumed.Link;
+                    _head = consumed.Link;
+                    _head.Block.Start = consumed.Index;
                 }
 
                 if (!examined.IsDefault &&
@@ -174,7 +180,7 @@ namespace Channels
             {
                 var returnBlock = returnStart;
                 returnStart = returnStart.Next;
-                returnBlock.Pool.Return(returnBlock);
+                returnBlock.Block.Pool.Return(returnBlock.Block);
             }
 
             if (Interlocked.CompareExchange(ref _consumingState, 0, 1) != 1)
@@ -293,7 +299,7 @@ namespace Channels
                     var returnBlock = block;
                     block = block.Next;
 
-                    returnBlock.Pool.Return(returnBlock);
+                    returnBlock.Block.Pool.Return(returnBlock.Block);
                 }
 
                 _head = null;

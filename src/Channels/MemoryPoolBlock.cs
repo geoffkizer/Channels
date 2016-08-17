@@ -69,7 +69,7 @@ namespace Channels
         /// working memory. The "active" memory is grown when bytes are copied in, End is increased, and Next is assigned. The "active" 
         /// memory is shrunk when bytes are consumed, Start is increased, and blocks are returned to the pool.
         /// </summary>
-        public MemoryPoolBlock Next;
+//        public MemoryPoolBlock Next;
 
 #if DEBUG
         public bool IsLeased { get; set; }
@@ -113,7 +113,7 @@ namespace Channels
         /// </summary>
         public void Reset()
         {
-            Next = null;
+//            Next = null;
             Start = Data.Offset;
             End = Data.Offset;
         }
